@@ -96,7 +96,7 @@ class WanI2V:
             tokenizer_path=os.path.join(checkpoint_dir, config.clip_tokenizer))
 
         logging.info(f"Creating WanModel from {checkpoint_dir}")
-        self.model = WanModel.from_pretrained(checkpoint_dir)
+        self.model = WanModel.from_pretrained(checkpoint_dir, torch_dtype=torch.bfloat16)
         self.model.eval().requires_grad_(False)
 
         if t5_fsdp or dit_fsdp or use_usp:
