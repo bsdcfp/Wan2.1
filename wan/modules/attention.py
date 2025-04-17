@@ -13,11 +13,18 @@ try:
 except ModuleNotFoundError:
     FLASH_ATTN_2_AVAILABLE = False
 
+try:
+    import sageattention
+    SAGEATTENTION_2_AVAILABLE = True
+except ModuleNotFoundError:
+    SAGEATTENTION_2_AVAILABLE = False
+
 import warnings
 
 __all__ = [
     'flash_attention',
     'attention',
+    'sage_attention'
 ]
 
 
@@ -128,7 +135,33 @@ def flash_attention(
 
     # output
     return x.type(out_dtype)
+def sage_attention(
+    q,
+    k,
+    v,
+    q_lens=None,
+    k_lens=None,
+    causal=False,
+    dtype=torch.bfloat16,
+    **kwargs
+):
+    assert SAGEATTENTION_2_AVAILABLE
+    if q_lens is not None or k_lens is not None:
+        warnings.warn(
+            'Padding mask is disabled when using scaled_dot_product_attention. It can have a significant impact on performance.'
+        )
+    # attn_mask = None
 
+    q = q.transpose(1, 2).to(dtype)
+    k = k.transpose(1, 2).to(dtype)
+    v = v.transpose(1, 2).to(dtype)
+
+    out = sageattention.sageattn(q, k, v, is_causal=causal)
+    # out = torch.nn.functional.scaled_dot_product_attention(
+    #     q, k, v, attn_mask=attn_mask, is_causal=causal, dropout_p=dropout_p)
+
+    out = out.transpose(1, 2).contiguous()
+    return out
 
 def attention(
     q,
@@ -145,7 +178,35 @@ def attention(
     dtype=torch.bfloat16,
     fa_version=None,
 ):
-    if FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
+    if FLASH_ATTN_3_AVAILABLE:
+        # print("Use FLASH_ATTN_3.")
+        return flash_attention(
+            q=q,
+            k=k,
+            v=v,
+            q_lens=q_lens,
+            k_lens=k_lens,
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            q_scale=q_scale,
+            causal=causal,
+            window_size=window_size,
+            deterministic=deterministic,
+            dtype=dtype,
+            version=fa_version,
+        )
+    elif SAGEATTENTION_2_AVAILABLE:
+        # print("Use SAGEATTENTION_2.")
+        return sage_attention(
+            q,
+            k,
+            v,
+            q_lens=q_lens,
+            k_lens=k_lens,
+            causal=causal,
+            dtype=dtype)
+    elif FLASH_ATTN_2_AVAILABLE:
+        # print("Use FLASH_ATTN_2.")
         return flash_attention(
             q=q,
             k=k,
@@ -162,6 +223,7 @@ def attention(
             version=fa_version,
         )
     else:
+        # print("Use scaled_dot_product_attention.")
         if q_lens is not None or k_lens is not None:
             warnings.warn(
                 'Padding mask is disabled when using scaled_dot_product_attention. It can have a significant impact on performance.'

@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 import warnings
+import time
 
 warnings.filterwarnings('ignore')
 
@@ -186,6 +187,8 @@ def _parse_args():
         type=float,
         default=5.0,
         help="Classifier free guidance scale.")
+    parser.add_argument('--compile', action='store_true', help='Compile the model')
+    parser.add_argument('--sparse-videogen', action='store_true', help='Use sparse-attention on video generation.')
 
     args = parser.parse_args()
 
@@ -364,8 +367,25 @@ def generate(args):
             use_usp=(args.ulysses_size > 1 or args.ring_size > 1),
             t5_cpu=args.t5_cpu,
         )
+        if args.compile:
+            logging.info("Compile wan_i2v model ...")
+            wan_i2v.model = torch.compile(wan_i2v.model, mode="max-autotune-no-cudagraphs")
+            wan_i2v.generate(
+                args.prompt,
+                img,
+                max_area=MAX_AREA_CONFIGS[args.size],
+                frame_num=args.frame_num,
+                shift=args.sample_shift,
+                sample_solver=args.sample_solver,
+                sampling_steps=1,
+                guide_scale=args.sample_guide_scale,
+                seed=args.base_seed,
+                offload_model=args.offload_model)
 
         logging.info("Generating video ...")
+        
+        # 开始总计时  
+        start_time = time.perf_counter()  
         video = wan_i2v.generate(
             args.prompt,
             img,
@@ -377,6 +397,9 @@ def generate(args):
             guide_scale=args.sample_guide_scale,
             seed=args.base_seed,
             offload_model=args.offload_model)
+        # 结束总计时  
+        elapsed = time.perf_counter() - start_time  
+        logging.info(f"Inference execution time: {elapsed:.2f} seconds ({int(elapsed // 60)} minutes and {int(elapsed % 60)} seconds)")  
 
     if rank == 0:
         if args.save_file is None:
