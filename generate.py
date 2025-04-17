@@ -6,6 +6,7 @@ import os
 import sys
 import warnings
 import time
+import pandas as pd
 
 warnings.filterwarnings('ignore')
 
@@ -189,7 +190,11 @@ def _parse_args():
         help="Classifier free guidance scale.")
     parser.add_argument('--compile', action='store_true', help='Compile the model')
     parser.add_argument('--sparse-videogen', action='store_true', help='Use sparse-attention on video generation.')
-
+    parser.add_argument(
+        "--prompt_image_pairs",
+        type=str,
+        default=None,
+        help="The file contains prompt and image pairs to generate the image or video from.")
     args = parser.parse_args()
 
     _validate_args(args)
@@ -383,23 +388,81 @@ def generate(args):
                 offload_model=args.offload_model)
 
         logging.info("Generating video ...")
-        
-        # 开始总计时  
-        start_time = time.perf_counter()  
-        video = wan_i2v.generate(
-            args.prompt,
-            img,
-            max_area=MAX_AREA_CONFIGS[args.size],
-            frame_num=args.frame_num,
-            shift=args.sample_shift,
-            sample_solver=args.sample_solver,
-            sampling_steps=args.sample_steps,
-            guide_scale=args.sample_guide_scale,
-            seed=args.base_seed,
-            offload_model=args.offload_model)
-        # 结束总计时  
-        elapsed = time.perf_counter() - start_time  
-        logging.info(f"Inference execution time: {elapsed:.2f} seconds ({int(elapsed // 60)} minutes and {int(elapsed % 60)} seconds)")  
+
+        if args.prompt_image_pairs is not None:
+            df = pd.read_csv(args.prompt_image_pairs)  
+            # 2. 遍历每一行  
+            for idx, row in df.iterrows():  
+                image_path = os.path.join(os.path.dirname(args.prompt_image_pairs), row['video_path'])
+                caption = row['caption']  
+                logging.info(f"[{idx}] Input prompt: {caption}")
+                logging.info(f"[{idx}] Input image: {image_path}")
+                # 加载图片  
+                img = Image.open(image_path).convert("RGB")  
+
+                # 设置当前任务/参数  
+                args.prompt = caption  
+                # 其他args参数请确保提前设置好  
+                # 开始总计时  
+                start_time = time.perf_counter()  
+                video = wan_i2v.generate(
+                    args.prompt,
+                    img,
+                    max_area=MAX_AREA_CONFIGS[args.size],
+                    frame_num=args.frame_num,
+                    shift=args.sample_shift,
+                    sample_solver=args.sample_solver,
+                    sampling_steps=args.sample_steps,
+                    guide_scale=args.sample_guide_scale,
+                    seed=args.base_seed,
+                    offload_model=args.offload_model)
+                # 结束总计时  
+                elapsed = time.perf_counter() - start_time  
+                logging.info(f"Inference [{idx}] execution time: {elapsed:.2f} seconds ({int(elapsed // 60)} minutes and {int(elapsed % 60)} seconds)")  
+                formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                # save video
+                if rank == 0:
+                    formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    formatted_prompt = args.prompt.replace(" ", "_").replace("/",
+                                                                            "_")[:50]
+                    suffix = '.mp4'
+                    model_name=args.ckpt_dir.strip().strip("/").split("/")[-1]
+                    args.save_file = (f"{model_name}_steps{args.sample_steps}_[{idx}]" 
+                        f"_{formatted_prompt}_{formatted_time}"
+                        f".mp4")
+                    # args.save_file = f"[{idx}]_{args.task}_{args.size}_{args.ulysses_size}_{args.ring_size}_{formatted_prompt}_{formatted_time}" + suffix
+                    logging.info(f"Saving generated video to {args.save_file}")
+                    
+                    cache_video(
+                        tensor=video[None],
+                        save_file=args.save_file,
+                        fps=cfg.sample_fps,
+                        nrow=1,
+                        normalize=True,
+                        value_range=(-1, 1))
+                
+                # 控制生成视频个数
+                if idx > 3:
+                    break
+            rank = -1
+        else:
+            # 开始总计时  
+            start_time = time.perf_counter()  
+            video = wan_i2v.generate(
+                args.prompt,
+                img,
+                max_area=MAX_AREA_CONFIGS[args.size],
+                frame_num=args.frame_num,
+                shift=args.sample_shift,
+                sample_solver=args.sample_solver,
+                sampling_steps=args.sample_steps,
+                guide_scale=args.sample_guide_scale,
+                seed=args.base_seed,
+                offload_model=args.offload_model)
+            # 结束总计时  
+            elapsed = time.perf_counter() - start_time  
+            logging.info(f"Inference execution time: {elapsed:.2f} seconds ({int(elapsed // 60)} minutes and {int(elapsed % 60)} seconds)")  
+            formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     if rank == 0:
         if args.save_file is None:

@@ -15,16 +15,26 @@ echo "Starting at $(date +"%H:%M:%S")"
 # python generate_diffusers.py 
 
 model_id="/model_zoo/Wan2.1-I2V-14B-480P"
+prompt_image="/datasets/evaluate_wan2.1_i2v/i2v_evaluate_300_complex_with_cam_shake_0326.csv"
+
+# python generate.py \
+#     --task i2v-14B \
+#     --size 832*480 \
+#     --sample_steps 30 \
+#     --ckpt_dir $model_id \
+#     --image $image_path \
+#     --prompt "$prompt"\
+#     --base_seed 42 \
+#     --offload False # \
+#     # --compile
 python generate.py \
     --task i2v-14B \
     --size 832*480 \
     --sample_steps 30 \
     --ckpt_dir $model_id \
-    --image $image_path \
-    --prompt "$prompt"\
     --base_seed 42 \
-    --offload False # \
-    # --compile
+    --offload False \
+    --prompt_image_pairs $prompt_image
 
 end_time=$(date +%s)  
 elapsed=$((end_time - start_time))  
